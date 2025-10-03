@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Selección de Cursos</title>
+    <script src="tau-prolog.js"></script>
+    <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+    <h2>Sistema de Inscripción de Cursos</h2>
+
+    <div class="caja">
+        <p>Seleccione un alumno:</p>
+        <select id="alumno">
+            <option value="ana">Ana</option>
+            <option value="juan">Juan</option>
+            <option value="luis">Luis</option>
+            <option value="maria">María</option>
+            <option value="pedro">Pedro</option>
+            <option value="angel">Ángel</option>
+        </select>
+        <br><br>
+        <input type="button" value="Ver cursos disponibles" onclick="consultaCursos()"/>
+    </div>
+
+    <div class="caja">
+        <h3>Cursos que puede inscribir:</h3>
+        <form id="formCursos">
+            <div id="disponibles"></div>
+            <br>
+            <input type="button" value="Confirmar selección" onclick="confirmarSeleccion()"/>
+        </form>
+    </div>
+
+    <div class="caja">
+        <h3>Cursos bloqueados por prerrequisitos faltantes:</h3>
+        <div id="bloqueados"></div>
+    </div>
+
+    <div class="caja">
+        <h3>Cursos bloqueados por haber sido aprobados:</h3>
+        <div id="repetidos"></div>
+    </div>
+
+    <div class="caja">
+        <h3>Selección final:</h3>
+        <div id="seleccion_final"></div>
+    </div>
+
+    <!-- BASE DE CONOCIMIENTO -->
+    <script id="cursos.pl" type="text/prolog">
+        curso(matematicas1).
+        curso(matematicas2).
+        curso(programacion1).
+        curso(programacion2).
+        curso(logica).
+        curso(inteligencia_artificial).
+        curso(bases_de_datos).
+        curso(algoritmos).
+        curso(redes).
+        curso(sistemas_operativos).
+
+        prerequisito(matematicas2, matematicas1).
+        prerequisito(programacion2, programacion1).
+        prerequisito(inteligencia_artificial, logica).
+        prerequisito(inteligencia_artificial, programacion2).
+        prerequisito(bases_de_datos, programacion1).
+        prerequisito(algoritmos, matematicas2).
+        prerequisito(redes, sistemas_operativos).
+        prerequisito(sistemas_operativos, programacion1).
+
+        aprobado(ana, matematicas1).
+        aprobado(ana, programacion1).
+        aprobado(ana, logica).
+
+        aprobado(juan, matematicas1).
+        aprobado(juan, programacion1).
+        aprobado(juan, programacion2).
+        aprobado(juan, logica).
+        aprobado(juan, matematicas2).
+
+        aprobado(luis, matematicas1).
+        aprobado(luis, programacion1).
+
+        aprobado(maria, matematicas1).
+        aprobado(maria, logica).
+
+        aprobado(pedro, matematicas1).
+        aprobado(pedro, programacion1).
+        aprobado(pedro, bases_de_datos).
+
+        aprobado(angel, matematicas1).
+        aprobado(angel, logica).
+        aprobado(angel, programacion1).
+
+        no_repetido(Alumno, Curso) :-
+            \+ aprobado(Alumno, Curso).
+
+        puede_cursar(Alumno, Curso) :-
+            curso(Curso),
+            forall(prerequisito(Curso, Pre), aprobado(Alumno, Pre)).
+
+        curso_disponible(Alumno, Curso) :-
+            puede_cursar(Alumno, Curso),
+            no_repetido(Alumno, Curso).
+
+        prerrequisito_faltante(Alumno, Curso, Faltante) :-
+            prerequisito(Curso, Faltante),
+            \+ aprobado(Alumno, Faltante).
+    </script>
+
+    <script>
+        function consultaCursos() {
+            var alumno = document.getElementById("alumno").value;
+            var disponibles = document.getElementById("disponibles");
+            var bloqueados = document.getElementById("bloqueados");
+            var repetidos = document.getElementById("repetidos");
+            disponibles.innerHTML = ""; 
+            bloqueados.innerHTML = "";
+            repetidos.innerHTML = "";
+
+            var session = pl.create(1000);
+            var programa = document.getElementById("cursos.pl").text;
+            session.consult(programa);
+
+            session.query("curso(C).");
+            session.answers(function(ans){
+                if(pl.type.is_substitution(ans)){
+                    let curso = ans.lookup("C");
+
+                    var subSession = pl.create(1000);
+                    subSession.consult(programa);
+                    subSession.query("curso_disponible(" + alumno + ", " + curso + ").");
+                    subSession.answer(function(r){
+                        if(pl.type.is_substitution(r)){
+                            // Curso disponible
+                            disponibles.innerHTML += 
+                                "<label class='ok'><input type='checkbox' name='curso' value='"+curso+"'> "+curso+"</label><br>";
+                        } else {
+                            // Verificar si el curso ya fue aprobado
+                            var repSession = pl.create(1000);
+                            repSession.consult(programa);
+                            repSession.query("aprobado(" + alumno + ", " + curso + ").");
+                            repSession.answer(function(rep){
+                                if(pl.type.is_substitution(rep)){
+                                    // Curso ya aprobado
+                                    repetidos.innerHTML += "<p class='repetido'>"+curso+" (ya aprobado)</p>";
+                                } else {
+                                    // Curso bloqueado por prerrequisito
+                                    var faltantesSession = pl.create(1000);
+                                    faltantesSession.consult(programa);
+                                    faltantesSession.query("prerrequisito_faltante(" + alumno + ", " + curso + ", F).");
+                                    var listaFaltantes = [];
+                                    faltantesSession.answers(function(f){
+                                        if(pl.type.is_substitution(f)){
+                                            listaFaltantes.push(f.lookup("F"));
+                                        }
+                                    }, 1000);
+                                    if(listaFaltantes.length > 0){
+                                        bloqueados.innerHTML += "<p class='no'>"+curso+" (le falta: "+listaFaltantes.join(", ")+")</p>";
+                                    } else {
+                                        bloqueados.innerHTML += "<p class='no'>"+curso+"</p>";
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+        }
+
+        function confirmarSeleccion(){
+            var seleccionados = document.querySelectorAll("input[name='curso']:checked");
+            var salida = document.getElementById("seleccion_final");
+            salida.innerHTML = "<ul>";
+            seleccionados.forEach(curso =>{
+                salida.innerHTML += "<li>"+curso.value+"</li>";
+            });
+            salida.innerHTML += "</ul>";
+        }
+    </script>
+</body>
+</html>
